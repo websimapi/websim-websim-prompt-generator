@@ -18,6 +18,42 @@
             padding: 20px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            margin: 0;
+        }
+        .header-icon {
+            font-size: 24px;
+        }
+        .header-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header-logo img {
+            height: 40px;
+            width: auto;
+        }
+        .control-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+        }
+        .buttons-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
         .tabs {
             display: flex;
             gap: 10px;
@@ -28,6 +64,10 @@
             border-radius: 5px;
             cursor: pointer;
             background-color: #eee;
+            transition: all 0.2s ease;
+        }
+        .tab:hover {
+            background-color: #e0e0e0;
         }
         .tab.active {
             background-color: #007BFF;
@@ -44,6 +84,11 @@
             border-radius: 8px;
             padding: 15px;
             position: relative;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .project-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
         .project-card.selected {
             border-color: #007BFF;
@@ -84,6 +129,13 @@
             border-radius: 5px;
             cursor: pointer;
             font-weight: bold;
+            transition: background-color 0.2s ease;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        button:active {
+            transform: translateY(1px);
         }
         .primary-button {
             background-color: #007BFF;
@@ -121,6 +173,24 @@
             font-style: italic;
             color: #666;
         }
+        .infinite-scroll-loader {
+            text-align: center;
+            padding: 15px;
+            margin: 10px 0;
+            display: none;
+        }
+        .loader-spinner {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(0,123,255,0.3);
+            border-radius: 50%;
+            border-top-color: #007BFF;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
         .status-badge {
             display: inline-block;
             padding: 3px 8px;
@@ -142,18 +212,16 @@
         progress {
             width: 100%;
             height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
         }
-        .header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 20px;
+        progress::-webkit-progress-bar {
+            background-color: #e9ecef;
+            border-radius: 4px;
         }
-        .header h1 {
-            margin: 0;
-        }
-        .header-icon {
-            font-size: 24px;
+        progress::-webkit-progress-value {
+            background-color: #007BFF;
+            border-radius: 4px;
         }
         .error-message {
             color: #721c24;
@@ -175,16 +243,75 @@
             color: #856404;
             margin-top: 10px;
         }
+        .selected-count {
+            padding: 5px 10px;
+            background-color: #e9ecef;
+            border-radius: 15px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+        .blueprint-collapsed {
+            max-height: 200px;
+            overflow: hidden;
+            position: relative;
+        }
+        .blueprint-collapsed::after {
+            content: "";
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: linear-gradient(transparent, #f1f1f1);
+        }
+        .expand-collapse-btn {
+            margin-top: 5px;
+            text-align: center;
+            cursor: pointer;
+            color: #007BFF;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <div class="header-icon">🧙‍♂️</div>
-            <h1>WebSim Prompt Generator</h1>
+            <div class="header-logo">
+                <img src="/logo.png" alt="WebSim Prompt Generator">
+                <h1>WebSim Prompt Generator</h1>
+            </div>
         </div>
-        <p>Select projects to analyze and generate a merged blueprint prompt</p>
         
+        <!-- Blueprint Generation Controls at the top -->
+        <div class="control-section">
+            <p>Select projects below to analyze and generate a merged blueprint prompt</p>
+            
+            <div class="buttons-row">
+                <button id="generateBtn" class="primary-button" disabled>Generate Blueprint</button>
+                <button id="clearBtn" class="secondary-button">Clear Selection</button>
+                <div class="selected-count">0 projects selected</div>
+            </div>
+        </div>
+        
+        <!-- Output Container (initially hidden) -->
+        <div id="outputContainer" class="output-container" style="display: none;">
+            <div class="output-header">
+                <h3>Generated Blueprint</h3>
+                <button id="copyBtn" class="secondary-button">Copy to Clipboard</button>
+            </div>
+            <div id="statusContainer">
+                <div class="status-badge analyzing">Analyzing <span id="currentProject"></span></div>
+                <div class="progress-container">
+                    <progress id="analysisProgress" value="0" max="100"></progress>
+                </div>
+            </div>
+            <div id="outputContent" class="output-content blueprint-collapsed">
+                <!-- Generated blueprint will appear here -->
+            </div>
+            <div id="expandCollapseBtn" class="expand-collapse-btn">Show More</div>
+        </div>
+        
+        <!-- Project Browser Section -->
         <div class="tabs">
             <div class="tab active" data-tab="hot">Hot Projects</div>
             <div class="tab" data-tab="foryou">For You</div>
@@ -197,26 +324,8 @@
                 <!-- Projects will be loaded here -->
                 <div class="loading">Loading projects...</div>
             </div>
-        </div>
-        
-        <div class="buttons">
-            <button id="generateBtn" class="primary-button" disabled>Generate Blueprint</button>
-            <button id="clearBtn" class="secondary-button">Clear Selection</button>
-        </div>
-        
-        <div id="outputContainer" class="output-container" style="display: none;">
-            <div class="output-header">
-                <h3>Generated Blueprint</h3>
-                <button id="copyBtn" class="secondary-button">Copy to Clipboard</button>
-            </div>
-            <div id="statusContainer">
-                <div class="status-badge analyzing">Analyzing <span id="currentProject"></span></div>
-                <div class="progress-container">
-                    <progress id="analysisProgress" value="0" max="100"></progress>
-                </div>
-            </div>
-            <div id="outputContent" class="output-content">
-                <!-- Generated blueprint will appear here -->
+            <div id="infiniteScrollLoader" class="infinite-scroll-loader">
+                <div class="loader-spinner"></div>
             </div>
         </div>
     </div>
@@ -233,9 +342,19 @@
         const statusContainer = document.getElementById('statusContainer');
         const currentProject = document.getElementById('currentProject');
         const analysisProgress = document.getElementById('analysisProgress');
+        const infiniteScrollLoader = document.getElementById('infiniteScrollLoader');
+        const selectedCountDisplay = document.querySelector('.selected-count');
+        const expandCollapseBtn = document.getElementById('expandCollapseBtn');
         
         let selectedProjects = [];
         let currentTab = 'hot';
+        let isLoading = false;
+        let paginationData = {
+            hot: { offset: 0, hasMore: true },
+            foryou: { offset: 0, hasMore: true },
+            following: { offset: 0, hasMore: true },
+            new: { offset: 0, hasMore: true }
+        };
         
         // Initialize the app
         async function init() {
@@ -248,6 +367,15 @@
                         tabs.forEach(t => t.classList.remove('active'));
                         tab.classList.add('active');
                         currentTab = tab.dataset.tab;
+                        
+                        // Reset grid and load projects for the new tab
+                        projectGrid.innerHTML = '<div class="loading">Loading projects...</div>';
+                        
+                        // Reset pagination for this tab if it was previously exhausted
+                        if (!paginationData[currentTab].hasMore) {
+                            paginationData[currentTab] = { offset: 0, hasMore: true };
+                        }
+                        
                         loadProjects(currentTab);
                     });
                 });
@@ -255,8 +383,83 @@
                 generateBtn.addEventListener('click', generateBlueprint);
                 clearBtn.addEventListener('click', clearSelection);
                 copyBtn.addEventListener('click', copyToClipboard);
+                
+                // Infinite scroll event listener
+                window.addEventListener('scroll', handleScroll);
+                
+                // Blueprint expand/collapse
+                expandCollapseBtn.addEventListener('click', toggleBlueprintExpansion);
             } catch (error) {
                 showErrorMessage("Failed to initialize app: " + error.message, init);
+            }
+        }
+        
+        // Handle scroll events for infinite loading
+        function handleScroll() {
+            if (isLoading || !paginationData[currentTab].hasMore) return;
+            
+            const scrollY = window.scrollY;
+            const windowHeight = window.innerHeight;
+            const documentHeight = document.documentElement.scrollHeight;
+            
+            // Check if we're near the bottom (within 200px)
+            if (scrollY + windowHeight >= documentHeight - 200) {
+                loadMoreProjects();
+            }
+        }
+        
+        // Load more projects for infinite scroll
+        async function loadMoreProjects() {
+            if (isLoading || !paginationData[currentTab].hasMore) return;
+            
+            isLoading = true;
+            infiniteScrollLoader.style.display = 'block';
+            
+            try {
+                const offset = paginationData[currentTab].offset;
+                const limit = 12; // Number of items per page
+                
+                let newProjects;
+                
+                // Fetch projects from the appropriate endpoint with pagination
+                switch(currentTab) {
+                    case 'hot':
+                        newProjects = await fetchHotProjects(offset, limit);
+                        break;
+                    case 'foryou':
+                        newProjects = await fetchForYouProjects(offset, limit);
+                        break;
+                    case 'following':
+                        newProjects = await fetchFollowingProjects(offset, limit);
+                        break;
+                    case 'new':
+                        newProjects = await fetchNewProjects(offset, limit);
+                        break;
+                }
+                
+                // Update pagination data
+                paginationData[currentTab].offset += newProjects.length;
+                paginationData[currentTab].hasMore = newProjects.length === limit;
+                
+                // Append new projects to the grid
+                appendProjects(newProjects);
+            } catch (error) {
+                showErrorMessage(`Error loading more projects: ${error.message}`, loadMoreProjects);
+                console.error('Error loading more projects:', error);
+            } finally {
+                isLoading = false;
+                infiniteScrollLoader.style.display = 'none';
+            }
+        }
+        
+        // Toggle blueprint expansion/collapse
+        function toggleBlueprintExpansion() {
+            if (outputContent.classList.contains('blueprint-collapsed')) {
+                outputContent.classList.remove('blueprint-collapsed');
+                expandCollapseBtn.textContent = 'Show Less';
+            } else {
+                outputContent.classList.add('blueprint-collapsed');
+                expandCollapseBtn.textContent = 'Show More';
             }
         }
         
@@ -316,28 +519,40 @@
         
         // Load projects based on the selected tab
         async function loadProjects(tab) {
-            projectGrid.innerHTML = '<div class="loading">Loading projects...</div>';
+            if (projectGrid.querySelector('.loading')) {
+                // Only clear if we're on initial load
+                projectGrid.innerHTML = '<div class="loading">Loading projects...</div>';
+            }
             
             try {
+                const offset = 0; // Start at beginning for initial load
+                const limit = 12; // Number of items per page
+                
                 let projects;
+                
+                // Reset pagination data for this tab
+                paginationData[tab] = { offset: limit, hasMore: true };
                 
                 // Fetch projects from the appropriate endpoint
                 switch(tab) {
                     case 'hot':
-                        projects = await fetchHotProjects();
+                        projects = await fetchHotProjects(offset, limit);
                         break;
                     case 'foryou':
-                        projects = await fetchForYouProjects();
+                        projects = await fetchForYouProjects(offset, limit);
                         break;
                     case 'following':
-                        projects = await fetchFollowingProjects();
+                        projects = await fetchFollowingProjects(offset, limit);
                         break;
                     case 'new':
-                        projects = await fetchNewProjects();
+                        projects = await fetchNewProjects(offset, limit);
                         break;
                 }
                 
                 renderProjects(projects);
+                
+                // Update hasMore based on if we got a full page
+                paginationData[tab].hasMore = projects.length === limit;
             } catch (error) {
                 const retryHandler = () => loadProjects(tab);
                 projectGrid.innerHTML = '';
@@ -346,10 +561,10 @@
             }
         }
         
-        // Fetch hot projects with retry
-        async function fetchHotProjects() {
+        // Fetch hot projects with retry and pagination
+        async function fetchHotProjects(offset = 0, limit = 12) {
             try {
-                const response = await fetchWithRetry('/api/v1/feed/trending?feed=hot', { timeout: 10000 });
+                const response = await fetchWithRetry(`/api/v1/feed/trending?feed=hot&offset=${offset}&limit=${limit}`, { timeout: 10000 });
                 const data = await response.json();
                 return data.feed.data;
             } catch (error) {
@@ -357,10 +572,10 @@
             }
         }
         
-        // Fetch "For You" projects with retry
-        async function fetchForYouProjects() {
+        // Fetch "For You" projects with retry and pagination
+        async function fetchForYouProjects(offset = 0, limit = 12) {
             try {
-                const response = await fetchWithRetry('/api/v1/feed/trending?feed=recommended', { timeout: 10000 });
+                const response = await fetchWithRetry(`/api/v1/feed/trending?feed=recommended&offset=${offset}&limit=${limit}`, { timeout: 10000 });
                 const data = await response.json();
                 return data.feed.data;
             } catch (error) {
@@ -368,8 +583,8 @@
             }
         }
         
-        // Fetch projects from users you're following with retry
-        async function fetchFollowingProjects() {
+        // Fetch projects from users you're following with retry and pagination
+        async function fetchFollowingProjects(offset = 0, limit = 12) {
             try {
                 // First get the current user
                 const user = await window.websim.getUser();
@@ -378,7 +593,7 @@
                     throw new Error('You need to be logged in to see following projects');
                 }
                 
-                const response = await fetchWithRetry(`/api/v1/users/${user.username}/following/projects`, { timeout: 10000 });
+                const response = await fetchWithRetry(`/api/v1/users/${user.username}/following/projects?first=${limit}&after=${offset > 0 ? offset : ''}`, { timeout: 10000 });
                 const data = await response.json();
                 
                 return data.projects.data.map(item => ({
@@ -391,10 +606,10 @@
             }
         }
         
-        // Fetch new projects with retry
-        async function fetchNewProjects() {
+        // Fetch new projects with retry and pagination
+        async function fetchNewProjects(offset = 0, limit = 12) {
             try {
-                const response = await fetchWithRetry('/api/v1/feed/trending?feed=new', { timeout: 10000 });
+                const response = await fetchWithRetry(`/api/v1/feed/trending?feed=new&offset=${offset}&limit=${limit}`, { timeout: 10000 });
                 const data = await response.json();
                 return data.feed.data;
             } catch (error) {
@@ -404,13 +619,22 @@
         
         // Render projects in the grid
         function renderProjects(projects) {
-            projectGrid.innerHTML = '';
+            // Clear loading indicator if it exists
+            const loadingEl = projectGrid.querySelector('.loading');
+            if (loadingEl) {
+                projectGrid.innerHTML = '';
+            }
             
             if (!projects || projects.length === 0) {
                 projectGrid.innerHTML = '<div class="no-projects">No projects found</div>';
                 return;
             }
             
+            appendProjects(projects);
+        }
+        
+        // Append projects to the grid (for initial load or infinite scroll)
+        function appendProjects(projects) {
             projects.forEach(projectData => {
                 const project = projectData.project;
                 const site = projectData.site;
@@ -459,12 +683,18 @@
                         card.classList.remove('selected');
                     }
                     
-                    // Enable generate button if at least one project is selected
-                    generateBtn.disabled = selectedProjects.length === 0;
+                    // Update selection count and enable/disable generate button
+                    updateSelectionCount();
                 });
                 
                 projectGrid.appendChild(card);
             });
+        }
+        
+        // Update the selection count display
+        function updateSelectionCount() {
+            selectedCountDisplay.textContent = `${selectedProjects.length} project${selectedProjects.length !== 1 ? 's' : ''} selected`;
+            generateBtn.disabled = selectedProjects.length === 0;
         }
         
         // Add a project to the selected projects list
@@ -498,8 +728,8 @@
                 card.classList.remove('selected');
             });
             
-            // Disable generate button
-            generateBtn.disabled = true;
+            // Update selection count and disable generate button
+            updateSelectionCount();
             
             // Hide output container
             outputContainer.style.display = 'none';
@@ -516,6 +746,8 @@
             outputContainer.style.display = 'block';
             statusContainer.style.display = 'block';
             outputContent.innerHTML = 'Preparing to analyze projects...';
+            outputContent.classList.add('blueprint-collapsed');
+            expandCollapseBtn.textContent = 'Show More';
             
             // Analyze each project
             const projectAnalyses = [];
