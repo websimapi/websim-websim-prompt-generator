@@ -155,6 +155,26 @@
         .header-icon {
             font-size: 24px;
         }
+        .error-message {
+            color: #721c24;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .retry-button {
+            background-color: #ffc107;
+            color: #212529;
+            margin-left: 10px;
+        }
+        .project-error {
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #fff3cd;
+            color: #856404;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -219,21 +239,79 @@
         
         // Initialize the app
         async function init() {
-            await loadProjects(currentTab);
-            
-            // Add event listeners
-            tabs.forEach(tab => {
-                tab.addEventListener('click', () => {
-                    tabs.forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-                    currentTab = tab.dataset.tab;
-                    loadProjects(currentTab);
+            try {
+                await loadProjects(currentTab);
+                
+                // Add event listeners
+                tabs.forEach(tab => {
+                    tab.addEventListener('click', () => {
+                        tabs.forEach(t => t.classList.remove('active'));
+                        tab.classList.add('active');
+                        currentTab = tab.dataset.tab;
+                        loadProjects(currentTab);
+                    });
                 });
-            });
+                
+                generateBtn.addEventListener('click', generateBlueprint);
+                clearBtn.addEventListener('click', clearSelection);
+                copyBtn.addEventListener('click', copyToClipboard);
+            } catch (error) {
+                showErrorMessage("Failed to initialize app: " + error.message, init);
+            }
+        }
+        
+        // Generic fetch with retry functionality
+        async function fetchWithRetry(url, options = {}, retries = 3, backoff = 1000) {
+            try {
+                const response = await fetch(url, { 
+                    ...options, 
+                    // Add timeout using AbortController
+                    signal: options.signal || (options.timeout ? AbortSignal.timeout(options.timeout) : undefined)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+                }
+                
+                return response;
+            } catch (error) {
+                if (retries <= 0) {
+                    throw new Error(`Failed after multiple attempts: ${error.message}`);
+                }
+                
+                // Log retry attempt
+                console.log(`Retrying fetch to ${url} after ${backoff}ms delay. Attempts remaining: ${retries}`);
+                
+                // Wait with exponential backoff
+                await new Promise(resolve => setTimeout(resolve, backoff));
+                
+                // Recursively retry with fewer retries and longer backoff
+                return fetchWithRetry(url, options, retries - 1, backoff * 1.5);
+            }
+        }
+        
+        // Show error message with optional retry button
+        function showErrorMessage(message, retryCallback = null) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = message;
             
-            generateBtn.addEventListener('click', generateBlueprint);
-            clearBtn.addEventListener('click', clearSelection);
-            copyBtn.addEventListener('click', copyToClipboard);
+            if (retryCallback) {
+                const retryButton = document.createElement('button');
+                retryButton.className = 'secondary-button retry-button';
+                retryButton.textContent = 'Try Again';
+                retryButton.addEventListener('click', retryCallback);
+                errorDiv.appendChild(retryButton);
+            }
+            
+            // Insert at the beginning of the content area or output
+            if (outputContainer.style.display !== 'none') {
+                outputContent.insertAdjacentElement('afterbegin', errorDiv);
+            } else {
+                projectGrid.insertAdjacentElement('afterbegin', errorDiv);
+            }
+            
+            return errorDiv;
         }
         
         // Load projects based on the selected tab
@@ -261,49 +339,67 @@
                 
                 renderProjects(projects);
             } catch (error) {
-                projectGrid.innerHTML = `<div class="error">Error loading projects: ${error.message}</div>`;
+                const retryHandler = () => loadProjects(tab);
+                projectGrid.innerHTML = '';
+                showErrorMessage(`Error loading projects: ${error.message}`, retryHandler);
                 console.error('Error loading projects:', error);
             }
         }
         
-        // Fetch hot projects
+        // Fetch hot projects with retry
         async function fetchHotProjects() {
-            const response = await fetch('/api/v1/feed/trending?feed=hot');
-            const data = await response.json();
-            return data.feed.data;
-        }
-        
-        // Fetch "For You" projects
-        async function fetchForYouProjects() {
-            const response = await fetch('/api/v1/feed/trending?feed=recommended');
-            const data = await response.json();
-            return data.feed.data;
-        }
-        
-        // Fetch projects from users you're following
-        async function fetchFollowingProjects() {
-            // First get the current user
-            const user = await window.websim.getUser();
-            
-            if (!user) {
-                throw new Error('You need to be logged in to see following projects');
+            try {
+                const response = await fetchWithRetry('/api/v1/feed/trending?feed=hot', { timeout: 10000 });
+                const data = await response.json();
+                return data.feed.data;
+            } catch (error) {
+                throw new Error(`Failed to fetch hot projects: ${error.message}`);
             }
-            
-            const response = await fetch(`/api/v1/users/${user.username}/following/projects`);
-            const data = await response.json();
-            
-            return data.projects.data.map(item => ({
-                project: item.project,
-                project_revision: item.project_revision,
-                site: item.site
-            }));
         }
         
-        // Fetch new projects
+        // Fetch "For You" projects with retry
+        async function fetchForYouProjects() {
+            try {
+                const response = await fetchWithRetry('/api/v1/feed/trending?feed=recommended', { timeout: 10000 });
+                const data = await response.json();
+                return data.feed.data;
+            } catch (error) {
+                throw new Error(`Failed to fetch recommended projects: ${error.message}`);
+            }
+        }
+        
+        // Fetch projects from users you're following with retry
+        async function fetchFollowingProjects() {
+            try {
+                // First get the current user
+                const user = await window.websim.getUser();
+                
+                if (!user) {
+                    throw new Error('You need to be logged in to see following projects');
+                }
+                
+                const response = await fetchWithRetry(`/api/v1/users/${user.username}/following/projects`, { timeout: 10000 });
+                const data = await response.json();
+                
+                return data.projects.data.map(item => ({
+                    project: item.project,
+                    project_revision: item.project_revision,
+                    site: item.site
+                }));
+            } catch (error) {
+                throw new Error(`Failed to fetch following projects: ${error.message}`);
+            }
+        }
+        
+        // Fetch new projects with retry
         async function fetchNewProjects() {
-            const response = await fetch('/api/v1/feed/trending?feed=new');
-            const data = await response.json();
-            return data.feed.data;
+            try {
+                const response = await fetchWithRetry('/api/v1/feed/trending?feed=new', { timeout: 10000 });
+                const data = await response.json();
+                return data.feed.data;
+            } catch (error) {
+                throw new Error(`Failed to fetch new projects: ${error.message}`);
+            }
         }
         
         // Render projects in the grid
@@ -427,6 +523,8 @@
             analysisProgress.value = progress;
             analysisProgress.max = selectedProjects.length;
             
+            let hadErrors = false;
+            
             try {
                 for (const project of selectedProjects) {
                     currentProject.textContent = project.title;
@@ -442,7 +540,32 @@
                         
                         outputContent.innerHTML = `Completed analysis of: ${project.title}\n\n${outputContent.innerHTML}`;
                     } catch (error) {
-                        outputContent.innerHTML = `Error analyzing ${project.title}: ${error.message}\n\n${outputContent.innerHTML}`;
+                        hadErrors = true;
+                        const projectErrorDiv = document.createElement('div');
+                        projectErrorDiv.className = 'project-error';
+                        
+                        const errorMessage = `Error analyzing ${project.title}: ${error.message}`;
+                        projectErrorDiv.textContent = errorMessage;
+                        
+                        // Add retry button for this specific project
+                        const retryButton = document.createElement('button');
+                        retryButton.className = 'secondary-button retry-button';
+                        retryButton.textContent = 'Retry this project';
+                        retryButton.addEventListener('click', async () => {
+                            projectErrorDiv.textContent = `Retrying ${project.title}...`;
+                            try {
+                                const projectCode = await getProjectCode(project.id, project.version);
+                                const analysis = await analyzeProject(project, projectCode);
+                                projectAnalyses.push(analysis);
+                                projectErrorDiv.textContent = `Completed analysis of: ${project.title}`;
+                                projectErrorDiv.className = 'status-badge complete';
+                            } catch (retryError) {
+                                projectErrorDiv.textContent = `Failed retry for ${project.title}: ${retryError.message}`;
+                            }
+                        });
+                        
+                        projectErrorDiv.appendChild(retryButton);
+                        outputContent.insertAdjacentElement('afterbegin', projectErrorDiv);
                         console.error(`Error analyzing project ${project.id}:`, error);
                     }
                     
@@ -451,103 +574,184 @@
                     analysisProgress.value = progress;
                 }
                 
+                if (projectAnalyses.length === 0) {
+                    throw new Error("Failed to analyze any projects. Please try again.");
+                }
+                
                 // Generate the final blueprint
                 currentProject.textContent = 'Creating final blueprint';
                 outputContent.innerHTML = `Generating final blueprint from ${projectAnalyses.length} project analyses...\n\n${outputContent.innerHTML}`;
                 
-                const blueprint = await createMergedBlueprint(projectAnalyses);
+                // Try to generate the blueprint with exponential backoff
+                let blueprint = null;
+                let blueprintError = null;
                 
-                // Update UI
-                statusContainer.innerHTML = '<div class="status-badge complete">Blueprint Complete</div>';
-                outputContent.textContent = blueprint;
+                try {
+                    blueprint = await createMergedBlueprint(projectAnalyses);
+                } catch (error) {
+                    blueprintError = error;
+                    // Show error but continue to retry buttons
+                    const errorDiv = showErrorMessage(`Error generating final blueprint: ${error.message}`, null);
+                    
+                    // Add specific retry button for blueprint generation
+                    const blueprintRetryButton = document.createElement('button');
+                    blueprintRetryButton.className = 'secondary-button retry-button';
+                    blueprintRetryButton.textContent = 'Retry Blueprint Generation';
+                    blueprintRetryButton.addEventListener('click', async () => {
+                        errorDiv.textContent = 'Retrying blueprint generation...';
+                        try {
+                            const newBlueprint = await createMergedBlueprint(projectAnalyses);
+                            statusContainer.innerHTML = '<div class="status-badge complete">Blueprint Complete</div>';
+                            outputContent.textContent = newBlueprint;
+                            errorDiv.remove();
+                        } catch (retryError) {
+                            errorDiv.textContent = `Blueprint generation failed again: ${retryError.message}`;
+                            errorDiv.appendChild(blueprintRetryButton.cloneNode(true));
+                            errorDiv.querySelector('.retry-button').addEventListener('click', 
+                                blueprintRetryButton.onclick);
+                        }
+                    });
+                    
+                    errorDiv.appendChild(blueprintRetryButton);
+                }
+                
+                // If we successfully generated a blueprint, show it
+                if (blueprint) {
+                    statusContainer.innerHTML = '<div class="status-badge complete">Blueprint Complete</div>';
+                    outputContent.textContent = blueprint;
+                } else if (hadErrors) {
+                    // If we didn't get a blueprint and had analysis errors, let the user know
+                    statusContainer.innerHTML = '<div class="status-badge analyzing">Blueprint Incomplete - Some Projects Failed</div>';
+                }
+                
             } catch (error) {
-                outputContent.innerHTML = `Error generating blueprint: ${error.message}\n\n${outputContent.innerHTML}`;
+                // This is for errors outside the individual project analysis or blueprint generation
+                showErrorMessage(`Error in blueprint process: ${error.message}`, () => generateBlueprint());
                 console.error('Error generating blueprint:', error);
             }
         }
         
-        // Get project code
+        // Get project code with retry
         async function getProjectCode(projectId, version) {
-            const response = await fetch(`/api/v1/projects/${projectId}/revisions/${version}/html`);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch project code: ${response.status} ${response.statusText}`);
-            }
-            return response.text();
-        }
-        
-        // Analyze a single project
-        async function analyzeProject(project, code) {
-            // Call the LLM to analyze the project code
             try {
-                const completion = await websim.chat.completions.create({
-                    messages: [
-                        {
-                            role: "system",
-                            content: `You are an expert at analyzing web project code and creating detailed descriptions. 
-                            Analyze the following code from a WebSim project titled "${project.title}" and create a detailed description of:
-                            1. What the project does
-                            2. Key features and functionality
-                            3. Technical implementation details
-                            4. The structure and organization of the code
-                            
-                            Focus on aspects that would be important when merging this project with others.`
-                        },
-                        {
-                            role: "user",
-                            content: code
-                        }
-                    ]
-                });
+                const response = await fetchWithRetry(
+                    `/api/v1/projects/${projectId}/revisions/${version}/html`,
+                    { timeout: 15000, retries: 3 }
+                );
                 
-                return {
-                    project: project,
-                    analysis: completion.content
-                };
+                return response.text();
             } catch (error) {
-                console.error('Error in LLM analysis:', error);
-                throw new Error(`LLM analysis failed: ${error.message}`);
+                throw new Error(`Failed to fetch project code: ${error.message}`);
             }
         }
         
-        // Create the final merged blueprint
+        // Analyze a single project with retry for LLM calls
+        async function analyzeProject(project, code) {
+            // Call the LLM to analyze the project code with retry
+            const maxRetries = 3;
+            let retryCount = 0;
+            let lastError = null;
+            
+            while (retryCount <= maxRetries) {
+                try {
+                    const completion = await websim.chat.completions.create({
+                        messages: [
+                            {
+                                role: "system",
+                                content: `You are an expert at analyzing web project code and creating detailed descriptions. 
+                                Analyze the following code from a WebSim project titled "${project.title}" and create a detailed description of:
+                                1. What the project does
+                                2. Key features and functionality
+                                3. Technical implementation details
+                                4. The structure and organization of the code
+                                
+                                Focus on aspects that would be important when merging this project with others.`
+                            },
+                            {
+                                role: "user",
+                                content: code
+                            }
+                        ]
+                    });
+                    
+                    return {
+                        project: project,
+                        analysis: completion.content
+                    };
+                } catch (error) {
+                    lastError = error;
+                    retryCount++;
+                    console.warn(`LLM analysis attempt ${retryCount}/${maxRetries} failed:`, error);
+                    
+                    if (retryCount <= maxRetries) {
+                        // Wait with exponential backoff before retrying
+                        const backoffTime = Math.pow(2, retryCount) * 1000 + Math.random() * 1000;
+                        await new Promise(resolve => setTimeout(resolve, backoffTime));
+                    }
+                }
+            }
+            
+            // If we've reached here, all retries failed
+            console.error('All LLM analysis attempts failed:', lastError);
+            throw new Error(`Analysis failed after ${maxRetries} attempts: ${lastError.message}`);
+        }
+        
+        // Create the final merged blueprint with retry
         async function createMergedBlueprint(projectAnalyses) {
             // Prepare a message for the LLM with all project analyses
             let analysesText = projectAnalyses.map(pa => 
                 `PROJECT: ${pa.project.title}\n\nANALYSIS:\n${pa.analysis}\n\n---\n\n`
             ).join('');
             
-            // Call the LLM to create the merged blueprint
-            try {
-                const completion = await websim.chat.completions.create({
-                    messages: [
-                        {
-                            role: "system",
-                            content: `You are an expert at creating new web projects by combining features from existing ones.
-                            
-                            Based on the analyses of the following ${projectAnalyses.length} projects, create a detailed blueprint for a new project that merges their key features and functionality.
-                            
-                            Your blueprint should include:
-                            1. A concise title for the merged project
-                            2. A detailed description of what the merged project does
-                            3. The key features and functionality from each source project that should be included
-                            4. A technical implementation plan explaining how to merge these features
-                            5. The structure and organization of the new merged codebase
-                            6. Any potential challenges in merging these projects and how to overcome them
-                            
-                            Format your response as a complete blueprint that a developer could use as a prompt for creating this merged project in WebSim.`
-                        },
-                        {
-                            role: "user",
-                            content: analysesText
-                        }
-                    ]
-                });
-                
-                return completion.content;
-            } catch (error) {
-                console.error('Error in final blueprint generation:', error);
-                throw new Error(`Blueprint generation failed: ${error.message}`);
+            // Call the LLM to create the merged blueprint with retry
+            const maxRetries = 3;
+            let retryCount = 0;
+            let lastError = null;
+            
+            while (retryCount <= maxRetries) {
+                try {
+                    const completion = await websim.chat.completions.create({
+                        messages: [
+                            {
+                                role: "system",
+                                content: `You are an expert at creating new web projects by combining features from existing ones.
+                                
+                                Based on the analyses of the following ${projectAnalyses.length} projects, create a detailed blueprint for a new project that merges their key features and functionality.
+                                
+                                Your blueprint should include:
+                                1. A concise title for the merged project
+                                2. A detailed description of what the merged project does
+                                3. The key features and functionality from each source project that should be included
+                                4. A technical implementation plan explaining how to merge these features
+                                5. The structure and organization of the new merged codebase
+                                6. Any potential challenges in merging these projects and how to overcome them
+                                
+                                Format your response as a complete blueprint that a developer could use as a prompt for creating this merged project in WebSim.`
+                            },
+                            {
+                                role: "user",
+                                content: analysesText
+                            }
+                        ]
+                    });
+                    
+                    return completion.content;
+                } catch (error) {
+                    lastError = error;
+                    retryCount++;
+                    console.warn(`Blueprint generation attempt ${retryCount}/${maxRetries} failed:`, error);
+                    
+                    if (retryCount <= maxRetries) {
+                        // Wait with exponential backoff before retrying
+                        const backoffTime = Math.pow(2, retryCount) * 1000 + Math.random() * 1000;
+                        await new Promise(resolve => setTimeout(resolve, backoffTime));
+                    }
+                }
             }
+            
+            // If we've reached here, all retries failed
+            console.error('All blueprint generation attempts failed:', lastError);
+            throw new Error(`Blueprint generation failed after ${maxRetries} attempts: ${lastError.message}`);
         }
         
         // Copy blueprint to clipboard
@@ -573,4 +777,3 @@
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
-
